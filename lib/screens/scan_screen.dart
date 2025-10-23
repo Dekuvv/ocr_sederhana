@@ -16,40 +16,28 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen> {
-  CameraController? _controller;
-  Future<void>? _initializeControllerFuture;
+  late CameraController _controller;
+  late Future<void> _initializeControllerFuture;
 
   @override
   void initState() {
     super.initState();
-    _initializeControllerFuture = _initCamera();
+    _initCamera();
   }
 
   /// Initializes the first available camera and prepares the controller.
   Future<void> _initCamera() async {
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        throw Exception('Tidak ada kamera tersedia');
-      }
-      _controller = CameraController(
-        cameras.first,
-        ResolutionPreset.high,
-        enableAudio: false,
-      );
-      await _controller!.initialize();
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('Error initializing camera: $e');
-      rethrow;
+    final cameras = await availableCameras();
+    _controller = CameraController(cameras.first, ResolutionPreset.medium);
+    _initializeControllerFuture = _controller.initialize();
+    if (mounted) {
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -64,14 +52,8 @@ class _ScanScreenState extends State<ScanScreen> {
 
   /// Captures a picture from the camera, runs OCR on it and navigates to the result screen.
   Future<void> _takePicture() async {
-    if (_controller == null || !_controller!.value.isInitialized) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kamera belum siap')),
-      );
-      return;
-    }
-
     try {
+      await _initializeControllerFuture;
       if (!mounted) return;
       // Inform the user that OCR processing is starting
       ScaffoldMessenger.of(context).showSnackBar(
@@ -80,7 +62,7 @@ class _ScanScreenState extends State<ScanScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      final XFile image = await _controller!.takePicture();
+      final XFile image = await _controller.takePicture();
       final ocrText = await _ocrFromFile(File(image.path));
       if (!mounted) return;
       Navigator.push(
@@ -89,78 +71,57 @@ class _ScanScreenState extends State<ScanScreen> {
       );
     } catch (e) {
       if (!mounted) return;
+      // Show a generic error message without exposing the exception details
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saat mengambil/memproses foto: $e')),
+        const SnackBar(
+          content: Text(
+              'Pemindaian Gagal! Periksa Izin Kamera atau coba lagi.'),
+        ),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_controller.value.isInitialized) {
+      // Custom loading screen when the camera is not yet ready
+      return Scaffold(
+        backgroundColor: Colors.grey[900],
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              CircularProgressIndicator(color: Colors.yellow),
+              SizedBox(height: 16),
+              Text(
+                'Memuat Kamera...\nHarap tunggu.',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Kamera OCR')),
-      body: FutureBuilder<void>(
-        future: _initializeControllerFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Error: ${snapshot.error}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.red),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _initializeControllerFuture = _initCamera();
-                        });
-                      },
-                      child: const Text('Coba Lagi'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            // Camera is ready
-            if (_controller == null || !_controller!.value.isInitialized) {
-              return const Center(child: Text('Kamera tidak tersedia'));
-            }
-            return Column(
-              children: [
-                Expanded(
-                  child: CameraPreview(_controller!),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: ElevatedButton.icon(
-                    onPressed: _takePicture,
-                    icon: const Icon(Icons.camera),
-                    label: const Text('Ambil Foto & Scan'),
-                  ),
-                ),
-              ],
-            );
-          } else {
-            // Loading
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Menginisialisasi kamera...'),
-                ],
-              ),
-            );
-          }
-        },
+      body: Column(
+        children: [
+          Expanded(
+            child: AspectRatio(
+              aspectRatio: _controller.value.aspectRatio,
+              child: CameraPreview(_controller),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: ElevatedButton.icon(
+              onPressed: _takePicture,
+              icon: const Icon(Icons.camera),
+              label: const Text('Ambil Foto & Scan'),
+            ),
+          ),
+        ],
       ),
     );
   }
