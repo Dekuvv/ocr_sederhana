@@ -2,8 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'result_screen.dart';
 
 /// A stateful screen that displays the camera preview and allows the user
@@ -16,20 +14,20 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen> {
-  late CameraController _controller;
+  CameraController? _controller;
   late Future<void> _initializeControllerFuture;
 
   @override
   void initState() {
     super.initState();
-    _initCamera();
+    _initializeControllerFuture = _initCamera();
   }
 
   /// Initializes the first available camera and prepares the controller.
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
     _controller = CameraController(cameras.first, ResolutionPreset.medium);
-    _initializeControllerFuture = _controller.initialize();
+    await _controller!.initialize();
     if (mounted) {
       setState(() {});
     }
@@ -37,7 +35,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -54,7 +52,7 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _takePicture() async {
     try {
       await _initializeControllerFuture;
-      if (!mounted) return;
+      if (!mounted || _controller == null) return;
       // Inform the user that OCR processing is starting
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -62,7 +60,7 @@ class _ScanScreenState extends State<ScanScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      final XFile image = await _controller.takePicture();
+      final XFile image = await _controller!.takePicture();
       final ocrText = await _ocrFromFile(File(image.path));
       if (!mounted) return;
       Navigator.push(
@@ -83,46 +81,84 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_controller.value.isInitialized) {
-      // Custom loading screen when the camera is not yet ready
-      return Scaffold(
-        backgroundColor: Colors.grey[900],
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              CircularProgressIndicator(color: Colors.yellow),
-              SizedBox(height: 16),
-              Text(
-                'Memuat Kamera...\nHarap tunggu.',
-                style: TextStyle(color: Colors.white, fontSize: 18),
-                textAlign: TextAlign.center,
+    return FutureBuilder<void>(
+      future: _initializeControllerFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done && 
+            _controller != null && 
+            _controller!.value.isInitialized) {
+          // Camera is ready, show preview
+          return Scaffold(
+            appBar: AppBar(title: const Text('Kamera OCR')),
+            body: Column(
+              children: [
+                Expanded(
+                  child: AspectRatio(
+                    aspectRatio: _controller!.value.aspectRatio,
+                    child: CameraPreview(_controller!),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: ElevatedButton.icon(
+                    onPressed: _takePicture,
+                    icon: const Icon(Icons.camera),
+                    label: const Text('Ambil Foto & Scan'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        } else if (snapshot.hasError) {
+          // Show error if camera initialization failed
+          return Scaffold(
+            backgroundColor: Colors.grey[900],
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 60),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Gagal memuat kamera',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Error: ${snapshot.error}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Kembali'),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      );
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Kamera OCR')),
-      body: Column(
-        children: [
-          Expanded(
-            child: AspectRatio(
-              aspectRatio: _controller.value.aspectRatio,
-              child: CameraPreview(_controller),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: ElevatedButton.icon(
-              onPressed: _takePicture,
-              icon: const Icon(Icons.camera),
-              label: const Text('Ambil Foto & Scan'),
+          );
+        } else {
+          // Show loading indicator while camera is initializing
+          return Scaffold(
+            backgroundColor: Colors.grey[900],
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  CircularProgressIndicator(color: Colors.yellow),
+                  SizedBox(height: 16),
+                  Text(
+                    'Memuat Kamera...\nHarap tunggu.',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
+          );
+        }
+      },
     );
   }
 }
